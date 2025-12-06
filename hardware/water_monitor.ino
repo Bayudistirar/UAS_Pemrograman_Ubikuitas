@@ -30,7 +30,7 @@ int analogBufferIndex = 0;
 unsigned long lastRead = 0;
 unsigned long lastHistory = 0;
 const unsigned long READ_INTERVAL = 3000;
-const unsigned long HISTORY_INTERVAL = 60000;
+const unsigned long HISTORY_INTERVAL = 10000;
 
 void setup() {
   Serial.begin(115200);
