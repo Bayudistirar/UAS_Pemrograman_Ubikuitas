@@ -2,6 +2,7 @@
 #include <DallasTemperature.h>
 #include <WiFi.h>
 #include <FirebaseESP32.h>
+#include <time.h>
 
 #define WIFI_SSID "BAYU"
 #define WIFI_PASSWORD "musabayu"
@@ -16,12 +17,18 @@
 
 #define CALIBRATION_MODE false
 
+// NTP settings for WITA (UTC+8)
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 8 * 3600;  // WITA = UTC+8
+const int daylightOffset_sec = 0;
+
 OneWire oneWire(TEMP_PIN);
 DallasTemperature tempSensor(&oneWire);
 
 FirebaseData firebaseData;
 FirebaseConfig config;
 FirebaseAuth auth;
+FirebaseJson json;
 
 int analogBuffer[SCOUNT];
 int analogBufferTemp[SCOUNT];
@@ -35,6 +42,7 @@ const unsigned long HISTORY_INTERVAL = 10000;
 void setup() {
   Serial.begin(115200);
   
+  // Connect to WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting");
   while (WiFi.status() != WL_CONNECTED) {
@@ -44,6 +52,25 @@ void setup() {
   Serial.println("\nWiFi: Connected");
   Serial.println(WiFi.localIP());
   
+  // Initialize NTP
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  Serial.print("Syncing time");
+  struct tm timeinfo;
+  int attempts = 0;
+  while (!getLocalTime(&timeinfo) && attempts < 10) {
+    Serial.print(".");
+    delay(1000);
+    attempts++;
+  }
+  Serial.println();
+  if (attempts < 10) {
+    Serial.println("Time: Synced");
+    Serial.println(&timeinfo, "Current time: %Y-%m-%d %H:%M:%S");
+  } else {
+    Serial.println("Time: Failed to sync (continuing anyway)");
+  }
+  
+  // Initialize Firebase
   config.database_url = FIREBASE_HOST;
   config.signer.tokens.legacy_token = FIREBASE_AUTH;
   Firebase.begin(&config, &auth);
@@ -58,9 +85,29 @@ void setup() {
     Serial.println("\n=== CALIBRATION MODE ===");
     Serial.println("ADC | Voltage | TDS");
   } else {
-    Serial.println("\nTemp | TDS | Status | Firebase");
-    Serial.println("────────────────────────────────");
+    Serial.println("\nTime | Temp | TDS | Status | Firebase");
+    Serial.println("────────────────────────────────────────────────");
   }
+}
+
+unsigned long getCurrentTimestamp() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return millis();
+  }
+  time_t now;
+  time(&now);
+  return (unsigned long)now * 1000;  // Convert to milliseconds
+}
+
+String getFormattedTime() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return "??:??:??";
+  }
+  char buffer[9];
+  strftime(buffer, sizeof(buffer), "%H:%M:%S", &timeinfo);
+  return String(buffer);
 }
 
 void loop() {
@@ -98,31 +145,37 @@ void loop() {
       return;
     }
     
-    Serial.printf("%.1f | %.0f | %s | ", tempC, tdsValue, status.c_str());
+    // Get current timestamp
+    unsigned long timestamp = getCurrentTimestamp();
+    String timeStr = getFormattedTime();
+    
+    Serial.printf("%s | %.1f | %.0f | %s | ", timeStr.c_str(), tempC, tdsValue, status.c_str());
     
     if (Firebase.ready()) {
-      // Update current reading with server timestamp
-      String currentPath = "/current";
-      Firebase.setFloat(firebaseData, currentPath + "/temperature", tempC);
-      Firebase.setFloat(firebaseData, currentPath + "/tds", tdsValue);
-      Firebase.setString(firebaseData, currentPath + "/status", status);
-      Firebase.setTimestamp(firebaseData, currentPath + "/timestamp");
+      // Update current reading with real timestamp
+      json.clear();
+      json.set("temperature", tempC);
+      json.set("tds", tdsValue);
+      json.set("status", status);
+      json.set("timestamp", timestamp);
       
-      Serial.print("CURRENT ✓ ");
+      if (Firebase.setJSON(firebaseData, "/current", json)) {
+        Serial.print("CURRENT ✓ ");
+      } else {
+        Serial.print("CURRENT ✗ ");
+      }
       
-      // Log history every minute with server timestamp
+      // Log history every 10 seconds with real timestamp
       if (millis() - lastHistory >= HISTORY_INTERVAL) {
         lastHistory = millis();
         
-        String historyPath = "/readings";
-        String newKey = Firebase.push(firebaseData, historyPath);
+        json.clear();
+        json.set("temperature", tempC);
+        json.set("tds", tdsValue);
+        json.set("status", status);
+        json.set("timestamp", timestamp);
         
-        if (newKey.length() > 0) {
-          Firebase.setFloat(firebaseData, historyPath + "/" + newKey + "/temperature", tempC);
-          Firebase.setFloat(firebaseData, historyPath + "/" + newKey + "/tds", tdsValue);
-          Firebase.setString(firebaseData, historyPath + "/" + newKey + "/status", status);
-          Firebase.setTimestamp(firebaseData, historyPath + "/" + newKey + "/timestamp");
-          
+        if (Firebase.pushJSON(firebaseData, "/readings", json)) {
           Serial.println("HISTORY ✓");
         } else {
           Serial.println("HISTORY ✗");
