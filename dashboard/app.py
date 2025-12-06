@@ -23,14 +23,14 @@ auto_refresh = st.sidebar.checkbox("Auto Refresh", value=True)
 refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 1, 10, 3)
 history_limit = st.sidebar.slider("History Data Points", 10, 100, 50)
 
-# Timezone selector
+# Timezone selector - DEFAULT WITA
 timezone_options = {
     "WIB (UTC+7)": "Asia/Jakarta",
     "WITA (UTC+8)": "Asia/Makassar",
     "WIT (UTC+9)": "Asia/Jayapura",
     "UTC": "UTC"
 }
-selected_tz = st.sidebar.selectbox("Timezone", list(timezone_options.keys()), index=0)
+selected_tz = st.sidebar.selectbox("Timezone", list(timezone_options.keys()), index=1)  # WITA default
 user_timezone = pytz.timezone(timezone_options[selected_tz])
 
 # Title
@@ -40,20 +40,16 @@ st.markdown("**Real-time monitoring menggunakan ESP32, DS18B20, dan TDS Sensor**
 def convert_firebase_timestamp(timestamp_value):
     """Convert Firebase timestamp to datetime with timezone"""
     try:
-        # Firebase timestamp could be in different formats
         if isinstance(timestamp_value, dict) and '.sv' in timestamp_value:
-            # Server timestamp placeholder - use current time
             dt = datetime.now(pytz.UTC)
         elif isinstance(timestamp_value, (int, float)):
-            # Check if it's milliseconds or seconds
-            if timestamp_value > 1e10:  # Likely milliseconds
+            if timestamp_value > 1e10:
                 dt = datetime.fromtimestamp(timestamp_value / 1000, tz=pytz.UTC)
-            else:  # Likely seconds
+            else:
                 dt = datetime.fromtimestamp(timestamp_value, tz=pytz.UTC)
         else:
             dt = datetime.now(pytz.UTC)
         
-        # Convert to user's timezone
         return dt.astimezone(user_timezone)
     except:
         return datetime.now(user_timezone)
@@ -130,6 +126,13 @@ if current:
             quality = "Poor"
             color = "🔴"
         st.metric("Quality", f"{color} {quality}")
+    
+    # Alert banner for poor quality
+    if tds > 900 or temp < 15 or temp > 35:
+        st.error("🚨 **ALERT: Water quality is POOR!** TDS too high or temperature out of range. Immediate action recommended.")
+    elif tds > 600 or temp < 20 or temp > 30:
+        st.warning("⚠️ **WARNING: Water quality is declining.** Monitor closely.")
+    
 else:
     st.warning("⚠️ No data available. Check ESP32 connection.")
 
