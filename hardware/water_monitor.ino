@@ -3,23 +3,17 @@
 #include <WiFi.h>
 #include <FirebaseESP32.h>
 
-// WiFi credentials
 #define WIFI_SSID "BAYU"
 #define WIFI_PASSWORD "musabayu"
 
-// Firebase credentials
 #define FIREBASE_HOST "water-monitoring-54106-default-rtdb.asia-southeast1.firebasedatabase.app"
 #define FIREBASE_AUTH "jb4Tk9uWl2s3Icsdq5KpyPy5QKuwbrzlO1WUDLsY"
 
-// Pins
 #define TEMP_PIN 27
 #define TDS_PIN 34
-
-// TDS config
 #define VREF 3.3
 #define SCOUNT 30
 
-// Calibration mode - set true untuk kalibrasi
 #define CALIBRATION_MODE false
 
 OneWire oneWire(TEMP_PIN);
@@ -35,8 +29,8 @@ int analogBufferIndex = 0;
 
 unsigned long lastRead = 0;
 unsigned long lastHistory = 0;
-const unsigned long READ_INTERVAL = 3000;      // Update current every 3s
-const unsigned long HISTORY_INTERVAL = 60000;  // Log history every 1 min
+const unsigned long READ_INTERVAL = 3000;
+const unsigned long HISTORY_INTERVAL = 60000;
 
 void setup() {
   Serial.begin(115200);
@@ -62,7 +56,6 @@ void setup() {
   
   if (CALIBRATION_MODE) {
     Serial.println("\n=== CALIBRATION MODE ===");
-    Serial.println("Place sensor in known TDS solution");
     Serial.println("ADC | Voltage | TDS");
   } else {
     Serial.println("\nTemp | TDS | Status | Firebase");
@@ -100,40 +93,36 @@ void loop() {
     bool tdsOK = (medianADC >= 50 && medianADC <= 4000);
     String status = (tempOK && tdsOK) ? "OK" : "ERROR";
     
-    // Calibration output
     if (CALIBRATION_MODE) {
       Serial.printf("%4d | %.3fV | %.0f ppm\n", medianADC, voltage, tdsValue);
-      return; // Skip Firebase in calibration mode
+      return;
     }
     
-    // Normal output
     Serial.printf("%.1f | %.0f | %s | ", tempC, tdsValue, status.c_str());
     
-    // Update current reading
     if (Firebase.ready()) {
-      FirebaseJson current;
-      current.set("temperature", tempC);
-      current.set("tds", tdsValue);
-      current.set("status", status);
-      current.set("timestamp", millis() / 1000);
+      // Update current reading with server timestamp
+      String currentPath = "/current";
+      Firebase.setFloat(firebaseData, currentPath + "/temperature", tempC);
+      Firebase.setFloat(firebaseData, currentPath + "/tds", tdsValue);
+      Firebase.setString(firebaseData, currentPath + "/status", status);
+      Firebase.setTimestamp(firebaseData, currentPath + "/timestamp");
       
-      if (Firebase.setJSON(firebaseData, "/current", current)) {
-        Serial.print("CURRENT ✓ ");
-      } else {
-        Serial.print("FAILED ");
-      }
+      Serial.print("CURRENT ✓ ");
       
-      // Log history every minute
+      // Log history every minute with server timestamp
       if (millis() - lastHistory >= HISTORY_INTERVAL) {
         lastHistory = millis();
         
-        FirebaseJson history;
-        history.set("temperature", tempC);
-        history.set("tds", tdsValue);
-        history.set("status", status);
-        history.set("timestamp", millis() / 1000);
+        String historyPath = "/readings";
+        String newKey = Firebase.push(firebaseData, historyPath);
         
-        if (Firebase.pushJSON(firebaseData, "/readings", history)) {
+        if (newKey.length() > 0) {
+          Firebase.setFloat(firebaseData, historyPath + "/" + newKey + "/temperature", tempC);
+          Firebase.setFloat(firebaseData, historyPath + "/" + newKey + "/tds", tdsValue);
+          Firebase.setString(firebaseData, historyPath + "/" + newKey + "/status", status);
+          Firebase.setTimestamp(firebaseData, historyPath + "/" + newKey + "/timestamp");
+          
           Serial.println("HISTORY ✓");
         } else {
           Serial.println("HISTORY ✗");
