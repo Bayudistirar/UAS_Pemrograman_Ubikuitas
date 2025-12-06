@@ -2,9 +2,10 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, db
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 import pandas as pd
 import plotly.graph_objects as go
+import pytz
 
 # Initialize Firebase
 if not firebase_admin._apps:
@@ -22,9 +23,40 @@ auto_refresh = st.sidebar.checkbox("Auto Refresh", value=True)
 refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 1, 10, 3)
 history_limit = st.sidebar.slider("History Data Points", 10, 100, 50)
 
+# Timezone selector
+timezone_options = {
+    "WIB (UTC+7)": "Asia/Jakarta",
+    "WITA (UTC+8)": "Asia/Makassar",
+    "WIT (UTC+9)": "Asia/Jayapura",
+    "UTC": "UTC"
+}
+selected_tz = st.sidebar.selectbox("Timezone", list(timezone_options.keys()), index=0)
+user_timezone = pytz.timezone(timezone_options[selected_tz])
+
 # Title
 st.title("🌊 Water Quality Monitoring System")
 st.markdown("**Real-time monitoring menggunakan ESP32, DS18B20, dan TDS Sensor**")
+
+def convert_firebase_timestamp(timestamp_value):
+    """Convert Firebase timestamp to datetime with timezone"""
+    try:
+        # Firebase timestamp could be in different formats
+        if isinstance(timestamp_value, dict) and '.sv' in timestamp_value:
+            # Server timestamp placeholder - use current time
+            dt = datetime.now(pytz.UTC)
+        elif isinstance(timestamp_value, (int, float)):
+            # Check if it's milliseconds or seconds
+            if timestamp_value > 1e10:  # Likely milliseconds
+                dt = datetime.fromtimestamp(timestamp_value / 1000, tz=pytz.UTC)
+            else:  # Likely seconds
+                dt = datetime.fromtimestamp(timestamp_value, tz=pytz.UTC)
+        else:
+            dt = datetime.now(pytz.UTC)
+        
+        # Convert to user's timezone
+        return dt.astimezone(user_timezone)
+    except:
+        return datetime.now(user_timezone)
 
 def get_current_data():
     ref = db.reference('/current')
@@ -37,8 +69,7 @@ def get_history_data(limit):
         records = []
         for key, value in data.items():
             if 'timestamp' in value:
-                # Firebase timestamp is in milliseconds
-                value['datetime'] = pd.to_datetime(value['timestamp'], unit='ms')
+                value['datetime'] = convert_firebase_timestamp(value['timestamp'])
                 records.append(value)
         
         if records:
@@ -62,8 +93,8 @@ if current:
     
     # Format timestamp
     if 'timestamp' in current:
-        last_update = datetime.fromtimestamp(current['timestamp'] / 1000)
-        time_ago = datetime.now() - last_update
+        last_update = convert_firebase_timestamp(current['timestamp'])
+        time_ago = datetime.now(user_timezone) - last_update
         seconds_ago = int(time_ago.total_seconds())
         
         if seconds_ago < 60:
@@ -109,6 +140,11 @@ st.subheader("📈 Historical Trends")
 
 if history_df is not None and len(history_df) > 0:
     
+    # Show time range
+    time_start = history_df['datetime'].min().strftime('%H:%M:%S')
+    time_end = history_df['datetime'].max().strftime('%H:%M:%S')
+    st.caption(f"Showing data from {time_start} to {time_end}")
+    
     # Temperature Chart
     fig_temp = go.Figure()
     fig_temp.add_trace(
@@ -120,12 +156,13 @@ if history_df is not None and len(history_df) > 0:
             mode='lines+markers',
             marker=dict(size=8),
             fill='tozeroy',
-            fillcolor='rgba(255, 107, 107, 0.2)'
+            fillcolor='rgba(255, 107, 107, 0.2)',
+            hovertemplate='<b>%{x|%H:%M:%S}</b><br>Temp: %{y:.1f}°C<extra></extra>'
         )
     )
     
     fig_temp.update_layout(
-        title="Temperature Trend",
+        title="🌡️ Temperature Trend",
         xaxis_title="Time",
         yaxis_title="Temperature (°C)",
         height=300,
@@ -151,12 +188,13 @@ if history_df is not None and len(history_df) > 0:
             mode='lines+markers',
             marker=dict(size=8),
             fill='tozeroy',
-            fillcolor='rgba(78, 205, 196, 0.2)'
+            fillcolor='rgba(78, 205, 196, 0.2)',
+            hovertemplate='<b>%{x|%H:%M:%S}</b><br>TDS: %{y:.0f} ppm<extra></extra>'
         )
     )
     
     fig_tds.update_layout(
-        title="TDS Trend",
+        title="💧 TDS Trend",
         xaxis_title="Time",
         yaxis_title="TDS (ppm)",
         height=300,
@@ -193,14 +231,17 @@ if history_df is not None and len(history_df) > 0:
     
     with col4:
         st.metric("Total Readings", len(history_df))
-        time_span = (history_df['datetime'].max() - history_df['datetime'].min()).total_seconds() / 60
-        st.caption(f"Span: {time_span:.0f} minutes")
+        time_span = (history_df['datetime'].max() - history_df['datetime'].min()).total_seconds()
+        if time_span < 60:
+            st.caption(f"Span: {time_span:.0f} seconds")
+        else:
+            st.caption(f"Span: {time_span/60:.1f} minutes")
     
     # Export section
     st.divider()
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.caption(f"Last update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        st.caption(f"Last update: {datetime.now(user_timezone).strftime('%Y-%m-%d %H:%M:%S')} ({selected_tz})")
     with col2:
         csv = history_df.to_csv(index=False)
         st.download_button(
