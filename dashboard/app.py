@@ -274,20 +274,3 @@ else:
 if auto_refresh:
     time.sleep(refresh_interval)
     st.rerun()
-```
-
-**Key changes:**
-
-1. ✅ **ESP32 NTP sync** - Uses `pool.ntp.org` to get real time
-2. ✅ **WITA timezone** - GMT+8 configured on ESP32
-3. ✅ **Real clock timestamps** - Now in seconds since epoch
-4. ✅ **Adaptive X-axis formatting** - Changes based on time span (seconds/minutes/hours/days)
-5. ✅ **Shows current time** - Dashboard displays actual wall clock time
-6. ✅ **Date in hover** - Full datetime in chart hover
-
-**Serial output now shows:**
-```
-14:23:45 | 25.4 | 154 | OK | CURRENT ✓ 
-14:23:48 | 25.4 | 155 | OK | CURRENT ✓ 
-14:23:51 | 25.4 | 153 | OK | CURRENT ✓ 
-14:23:54 | 25.3 | 154 | OK | CURRENT ✓ HISTORY ✓
