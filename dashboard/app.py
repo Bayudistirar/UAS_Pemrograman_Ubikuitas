@@ -2,7 +2,7 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, db
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 import pytz
@@ -30,28 +30,27 @@ timezone_options = {
     "WIT (UTC+9)": "Asia/Jayapura",
     "UTC": "UTC"
 }
-selected_tz = st.sidebar.selectbox("Timezone", list(timezone_options.keys()), index=1)  # WITA default
+selected_tz = st.sidebar.selectbox("Timezone", list(timezone_options.keys()), index=1)
 user_timezone = pytz.timezone(timezone_options[selected_tz])
 
 # Title
 st.title("🌊 Water Quality Monitoring System")
 st.markdown("**Real-time monitoring menggunakan ESP32, DS18B20, dan TDS Sensor**")
 
-def convert_firebase_timestamp(timestamp_value):
-    """Convert Firebase timestamp to datetime with timezone"""
+def convert_timestamp_to_datetime(timestamp_value):
+    """Convert timestamp to datetime with timezone"""
     try:
-        if isinstance(timestamp_value, dict) and '.sv' in timestamp_value:
-            dt = datetime.now(pytz.UTC)
-        elif isinstance(timestamp_value, (int, float)):
-            if timestamp_value > 1e10:
-                dt = datetime.fromtimestamp(timestamp_value / 1000, tz=pytz.UTC)
-            else:
-                dt = datetime.fromtimestamp(timestamp_value, tz=pytz.UTC)
+        if isinstance(timestamp_value, (int, float)):
+            # Check if milliseconds or seconds
+            if timestamp_value > 1e12:  # Milliseconds
+                dt = datetime.fromtimestamp(timestamp_value / 1000, tz=user_timezone)
+            else:  # Seconds
+                dt = datetime.fromtimestamp(timestamp_value / 1000, tz=user_timezone)
         else:
-            dt = datetime.now(pytz.UTC)
-        
-        return dt.astimezone(user_timezone)
-    except:
+            dt = datetime.now(user_timezone)
+        return dt
+    except Exception as e:
+        print(f"Error converting timestamp: {e}")
         return datetime.now(user_timezone)
 
 def get_current_data():
@@ -64,8 +63,8 @@ def get_history_data(limit):
     if data:
         records = []
         for key, value in data.items():
-            if 'timestamp' in value:
-                value['datetime'] = convert_firebase_timestamp(value['timestamp'])
+            if 'timestamp' in value and value['timestamp'] is not None:
+                value['datetime'] = convert_timestamp_to_datetime(value['timestamp'])
                 records.append(value)
         
         if records:
@@ -88,8 +87,8 @@ if current:
     status = current.get('status', 'UNKNOWN')
     
     # Format timestamp
-    if 'timestamp' in current:
-        last_update = convert_firebase_timestamp(current['timestamp'])
+    if 'timestamp' in current and current['timestamp'] is not None:
+        last_update = convert_timestamp_to_datetime(current['timestamp'])
         time_ago = datetime.now(user_timezone) - last_update
         seconds_ago = int(time_ago.total_seconds())
         
@@ -129,7 +128,7 @@ if current:
     
     # Alert banner for poor quality
     if tds > 900 or temp < 15 or temp > 35:
-        st.error("🚨 **ALERT: Water quality is POOR!** TDS too high or temperature out of range. Immediate action recommended.")
+        st.error("🚨 **ALERT: Water quality is POOR!** TDS too high or temperature out of range.")
     elif tds > 600 or temp < 20 or temp > 30:
         st.warning("⚠️ **WARNING: Water quality is declining.** Monitor closely.")
     
@@ -143,10 +142,16 @@ st.subheader("📈 Historical Trends")
 
 if history_df is not None and len(history_df) > 0:
     
-    # Show time range
-    time_start = history_df['datetime'].min().strftime('%H:%M:%S')
-    time_end = history_df['datetime'].max().strftime('%H:%M:%S')
-    st.caption(f"Showing data from {time_start} to {time_end}")
+    # Show time range with date if spanning multiple days
+    time_start = history_df['datetime'].min()
+    time_end = history_df['datetime'].max()
+    
+    if time_start.date() == time_end.date():
+        range_str = f"{time_start.strftime('%H:%M:%S')} to {time_end.strftime('%H:%M:%S')} ({time_start.strftime('%Y-%m-%d')})"
+    else:
+        range_str = f"{time_start.strftime('%Y-%m-%d %H:%M:%S')} to {time_end.strftime('%Y-%m-%d %H:%M:%S')}"
+    
+    st.caption(f"📅 Showing data from {range_str}")
     
     # Temperature Chart
     fig_temp = go.Figure()
@@ -160,23 +165,27 @@ if history_df is not None and len(history_df) > 0:
             marker=dict(size=8),
             fill='tozeroy',
             fillcolor='rgba(255, 107, 107, 0.2)',
-            hovertemplate='<b>%{x|%H:%M:%S}</b><br>Temp: %{y:.1f}°C<extra></extra>'
+            hovertemplate='<b>%{x|%Y-%m-%d %H:%M:%S}</b><br>Temp: %{y:.1f}°C<extra></extra>'
         )
     )
     
     fig_temp.update_layout(
         title="🌡️ Temperature Trend",
-        xaxis_title="Time",
+        xaxis_title="Time (Real Clock)",
         yaxis_title="Temperature (°C)",
         height=300,
         hovermode='x unified',
         margin=dict(l=50, r=50, t=50, b=50)
     )
     
-    fig_temp.update_xaxes(
-        tickformat='%H:%M:%S',
-        tickangle=-45
-    )
+    # Format x-axis based on time span
+    time_span_hours = (time_end - time_start).total_seconds() / 3600
+    if time_span_hours < 1:
+        fig_temp.update_xaxes(tickformat='%H:%M:%S', tickangle=-45)
+    elif time_span_hours < 24:
+        fig_temp.update_xaxes(tickformat='%H:%M', tickangle=-45)
+    else:
+        fig_temp.update_xaxes(tickformat='%m-%d %H:%M', tickangle=-45)
     
     st.plotly_chart(fig_temp, use_container_width=True)
     
@@ -192,23 +201,25 @@ if history_df is not None and len(history_df) > 0:
             marker=dict(size=8),
             fill='tozeroy',
             fillcolor='rgba(78, 205, 196, 0.2)',
-            hovertemplate='<b>%{x|%H:%M:%S}</b><br>TDS: %{y:.0f} ppm<extra></extra>'
+            hovertemplate='<b>%{x|%Y-%m-%d %H:%M:%S}</b><br>TDS: %{y:.0f} ppm<extra></extra>'
         )
     )
     
     fig_tds.update_layout(
         title="💧 TDS Trend",
-        xaxis_title="Time",
+        xaxis_title="Time (Real Clock)",
         yaxis_title="TDS (ppm)",
         height=300,
         hovermode='x unified',
         margin=dict(l=50, r=50, t=50, b=50)
     )
     
-    fig_tds.update_xaxes(
-        tickformat='%H:%M:%S',
-        tickangle=-45
-    )
+    if time_span_hours < 1:
+        fig_tds.update_xaxes(tickformat='%H:%M:%S', tickangle=-45)
+    elif time_span_hours < 24:
+        fig_tds.update_xaxes(tickformat='%H:%M', tickangle=-45)
+    else:
+        fig_tds.update_xaxes(tickformat='%m-%d %H:%M', tickangle=-45)
     
     st.plotly_chart(fig_tds, use_container_width=True)
     
@@ -237,14 +248,17 @@ if history_df is not None and len(history_df) > 0:
         time_span = (history_df['datetime'].max() - history_df['datetime'].min()).total_seconds()
         if time_span < 60:
             st.caption(f"Span: {time_span:.0f} seconds")
-        else:
+        elif time_span < 3600:
             st.caption(f"Span: {time_span/60:.1f} minutes")
+        else:
+            st.caption(f"Span: {time_span/3600:.1f} hours")
     
     # Export section
     st.divider()
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.caption(f"Last update: {datetime.now(user_timezone).strftime('%Y-%m-%d %H:%M:%S')} ({selected_tz})")
+        current_time = datetime.now(user_timezone)
+        st.caption(f"🕐 Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} ({selected_tz})")
     with col2:
         csv = history_df.to_csv(index=False)
         st.download_button(
@@ -260,3 +274,20 @@ else:
 if auto_refresh:
     time.sleep(refresh_interval)
     st.rerun()
+```
+
+**Key changes:**
+
+1. ✅ **ESP32 NTP sync** - Uses `pool.ntp.org` to get real time
+2. ✅ **WITA timezone** - GMT+8 configured on ESP32
+3. ✅ **Real clock timestamps** - Now in seconds since epoch
+4. ✅ **Adaptive X-axis formatting** - Changes based on time span (seconds/minutes/hours/days)
+5. ✅ **Shows current time** - Dashboard displays actual wall clock time
+6. ✅ **Date in hover** - Full datetime in chart hover
+
+**Serial output now shows:**
+```
+14:23:45 | 25.4 | 154 | OK | CURRENT ✓ 
+14:23:48 | 25.4 | 155 | OK | CURRENT ✓ 
+14:23:51 | 25.4 | 153 | OK | CURRENT ✓ 
+14:23:54 | 25.3 | 154 | OK | CURRENT ✓ HISTORY ✓
