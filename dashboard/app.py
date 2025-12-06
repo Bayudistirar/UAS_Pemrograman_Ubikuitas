@@ -24,11 +24,8 @@ st.sidebar.header("⚙️ Controls")
 auto_refresh = st.sidebar.checkbox("Auto Refresh", value=True)
 history_limit = st.sidebar.slider("History Data Points", 10, 100, 50)
 
-# Main content
-current_placeholder = st.empty()
-chart_placeholder = st.empty()
-stats_placeholder = st.empty()
-export_placeholder = st.empty()
+# Main placeholders
+main_container = st.container()
 
 def get_current_data():
     ref = db.reference('/current')
@@ -44,11 +41,14 @@ def get_history_data(limit):
     return None
 
 while auto_refresh:
-    # Current data
-    current = get_current_data()
-    
-    if current:
-        with current_placeholder.container():
+    with main_container:
+        # Clear container
+        st.empty()
+        
+        # Current data
+        current = get_current_data()
+        
+        if current:
             st.subheader("📊 Current Reading")
             col1, col2, col3, col4 = st.columns(4)
             
@@ -81,12 +81,11 @@ while auto_refresh:
                 st.metric("Quality", f"{color} {quality}")
             
             st.divider()
-        
-        # Historical data & charts
-        history_df = get_history_data(history_limit)
-        
-        if history_df is not None and len(history_df) > 0:
-            with chart_placeholder.container():
+            
+            # Historical data & charts
+            history_df = get_history_data(history_limit)
+            
+            if history_df is not None and len(history_df) > 0:
                 st.subheader("📈 Historical Trends")
                 
                 # Create dual-axis chart
@@ -117,35 +116,33 @@ while auto_refresh:
                 fig.update_yaxes(title_text="TDS (ppm)", secondary_y=True)
                 fig.update_layout(height=400, hovermode='x unified')
                 
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Statistics
-            with stats_placeholder.container():
+                st.plotly_chart(fig, use_container_width=True, key=f"chart_{int(time.time())}")
+                
+                # Statistics
                 st.subheader("📊 Statistics")
                 col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
                     st.metric("Avg Temperature", f"{history_df['temperature'].mean():.1f}°C")
-                    st.metric("Min", f"{history_df['temperature'].min():.1f}°C")
-                    st.metric("Max", f"{history_df['temperature'].max():.1f}°C")
+                    st.caption(f"Min: {history_df['temperature'].min():.1f}°C")
+                    st.caption(f"Max: {history_df['temperature'].max():.1f}°C")
                 
                 with col2:
                     st.metric("Avg TDS", f"{history_df['tds'].mean():.0f} ppm")
-                    st.metric("Min", f"{history_df['tds'].min():.0f} ppm")
-                    st.metric("Max", f"{history_df['tds'].max():.0f} ppm")
+                    st.caption(f"Min: {history_df['tds'].min():.0f} ppm")
+                    st.caption(f"Max: {history_df['tds'].max():.0f} ppm")
                 
                 with col3:
                     ok_count = (history_df['status'] == 'OK').sum()
                     total = len(history_df)
                     st.metric("OK Status", f"{ok_count}/{total}")
-                    st.metric("Success Rate", f"{(ok_count/total*100):.1f}%")
+                    st.caption(f"Success: {(ok_count/total*100):.1f}%")
                 
                 with col4:
                     st.metric("Total Readings", len(history_df))
-                    st.metric("Data Points", history_limit)
-            
-            # Export data
-            with export_placeholder.container():
+                    st.caption(f"Points: {history_limit}")
+                
+                # Export data
                 st.divider()
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -156,14 +153,13 @@ while auto_refresh:
                         label="📥 Download CSV",
                         data=csv,
                         file_name=f"water_quality_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
+                        mime="text/csv",
+                        key=f"download_{int(time.time())}"
                     )
-        else:
-            with chart_placeholder.container():
+            else:
                 st.info("⏳ Waiting for historical data... (Data logged every minute)")
-    
-    else:
-        with current_placeholder.container():
+        
+        else:
             st.warning("⚠️ Tidak ada data. Pastikan ESP32 terkoneksi.")
     
     time.sleep(3)
