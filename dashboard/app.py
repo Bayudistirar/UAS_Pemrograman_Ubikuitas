@@ -2,7 +2,7 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, db
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -35,9 +35,16 @@ def get_history_data(limit):
     ref = db.reference('/readings').order_by_key().limit_to_last(limit)
     data = ref.get()
     if data:
-        df = pd.DataFrame.from_dict(data, orient='index')
-        df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
-        return df.sort_values('datetime')
+        records = []
+        for key, value in data.items():
+            if 'timestamp' in value:
+                # Firebase timestamp is in milliseconds
+                value['datetime'] = pd.to_datetime(value['timestamp'], unit='ms')
+                records.append(value)
+        
+        if records:
+            df = pd.DataFrame(records)
+            return df.sort_values('datetime')
     return None
 
 # Get data
@@ -54,6 +61,21 @@ if current:
     tds = current.get('tds', 0)
     status = current.get('status', 'UNKNOWN')
     
+    # Format timestamp
+    if 'timestamp' in current:
+        last_update = datetime.fromtimestamp(current['timestamp'] / 1000)
+        time_ago = datetime.now() - last_update
+        seconds_ago = int(time_ago.total_seconds())
+        
+        if seconds_ago < 60:
+            time_str = f"{seconds_ago}s ago"
+        elif seconds_ago < 3600:
+            time_str = f"{seconds_ago // 60}m ago"
+        else:
+            time_str = last_update.strftime('%H:%M:%S')
+    else:
+        time_str = "Unknown"
+    
     with col1:
         st.metric("🌡️ Temperature", f"{temp:.1f}°C")
     
@@ -62,6 +84,7 @@ if current:
     
     with col3:
         st.metric("📊 Status", status)
+        st.caption(f"Updated: {time_str}")
     
     with col4:
         if tds < 300:
@@ -86,7 +109,7 @@ st.divider()
 st.subheader("📈 Historical Trends")
 
 if history_df is not None and len(history_df) > 0:
-    # Create chart
+    # Create chart with formatted time
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     
     fig.add_trace(
@@ -94,8 +117,9 @@ if history_df is not None and len(history_df) > 0:
             x=history_df['datetime'],
             y=history_df['temperature'],
             name="Temperature (°C)",
-            line=dict(color='red', width=2),
-            mode='lines+markers'
+            line=dict(color='#FF6B6B', width=2),
+            mode='lines+markers',
+            marker=dict(size=6)
         ),
         secondary_y=False
     )
@@ -105,20 +129,32 @@ if history_df is not None and len(history_df) > 0:
             x=history_df['datetime'],
             y=history_df['tds'],
             name="TDS (ppm)",
-            line=dict(color='blue', width=2),
-            mode='lines+markers'
+            line=dict(color='#4ECDC4', width=2),
+            mode='lines+markers',
+            marker=dict(size=6)
         ),
         secondary_y=True
     )
     
-    fig.update_xaxes(title_text="Time")
-    fig.update_yaxes(title_text="Temperature (°C)", secondary_y=False)
-    fig.update_yaxes(title_text="TDS (ppm)", secondary_y=True)
+    fig.update_xaxes(
+        title_text="Time",
+        tickformat='%H:%M:%S',
+        tickangle=-45
+    )
+    fig.update_yaxes(title_text="<b>Temperature</b> (°C)", secondary_y=False, titlefont=dict(color='#FF6B6B'))
+    fig.update_yaxes(title_text="<b>TDS</b> (ppm)", secondary_y=True, titlefont=dict(color='#4ECDC4'))
     fig.update_layout(
-        height=400,
+        height=450,
         hovermode='x unified',
         showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        margin=dict(l=50, r=50, t=30, b=50)
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -145,7 +181,8 @@ if history_df is not None and len(history_df) > 0:
     
     with col4:
         st.metric("Total Readings", len(history_df))
-        st.caption(f"Data Points: {history_limit}")
+        time_span = (history_df['datetime'].max() - history_df['datetime'].min()).total_seconds() / 60
+        st.caption(f"Span: {time_span:.0f} minutes")
     
     # Export section
     st.divider()
