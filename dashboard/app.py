@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timezone
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # Initialize Firebase
 if not firebase_admin._apps:
@@ -109,55 +108,68 @@ st.divider()
 st.subheader("📈 Historical Trends")
 
 if history_df is not None and len(history_df) > 0:
-    # Create chart with formatted time
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
     
-    fig.add_trace(
+    # Temperature Chart
+    fig_temp = go.Figure()
+    fig_temp.add_trace(
         go.Scatter(
             x=history_df['datetime'],
             y=history_df['temperature'],
-            name="Temperature (°C)",
-            line=dict(color='#FF6B6B', width=2),
+            name="Temperature",
+            line=dict(color='#FF6B6B', width=3),
             mode='lines+markers',
-            marker=dict(size=6)
-        ),
-        secondary_y=False
+            marker=dict(size=8),
+            fill='tozeroy',
+            fillcolor='rgba(255, 107, 107, 0.2)'
+        )
     )
     
-    fig.add_trace(
-        go.Scatter(
-            x=history_df['datetime'],
-            y=history_df['tds'],
-            name="TDS (ppm)",
-            line=dict(color='#4ECDC4', width=2),
-            mode='lines+markers',
-            marker=dict(size=6)
-        ),
-        secondary_y=True
+    fig_temp.update_layout(
+        title="Temperature Trend",
+        xaxis_title="Time",
+        yaxis_title="Temperature (°C)",
+        height=300,
+        hovermode='x unified',
+        margin=dict(l=50, r=50, t=50, b=50)
     )
     
-    fig.update_xaxes(
-        title_text="Time",
+    fig_temp.update_xaxes(
         tickformat='%H:%M:%S',
         tickangle=-45
     )
-    fig.update_yaxes(title_text="<b>Temperature</b> (°C)", secondary_y=False, titlefont=dict(color='#FF6B6B'))
-    fig.update_yaxes(title_text="<b>TDS</b> (ppm)", secondary_y=True, titlefont=dict(color='#4ECDC4'))
-    fig.update_layout(
-        height=450,
-        hovermode='x unified',
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        ),
-        margin=dict(l=50, r=50, t=30, b=50)
+    
+    st.plotly_chart(fig_temp, use_container_width=True)
+    
+    # TDS Chart
+    fig_tds = go.Figure()
+    fig_tds.add_trace(
+        go.Scatter(
+            x=history_df['datetime'],
+            y=history_df['tds'],
+            name="TDS",
+            line=dict(color='#4ECDC4', width=3),
+            mode='lines+markers',
+            marker=dict(size=8),
+            fill='tozeroy',
+            fillcolor='rgba(78, 205, 196, 0.2)'
+        )
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    fig_tds.update_layout(
+        title="TDS Trend",
+        xaxis_title="Time",
+        yaxis_title="TDS (ppm)",
+        height=300,
+        hovermode='x unified',
+        margin=dict(l=50, r=50, t=50, b=50)
+    )
+    
+    fig_tds.update_xaxes(
+        tickformat='%H:%M:%S',
+        tickangle=-45
+    )
+    
+    st.plotly_chart(fig_tds, use_container_width=True)
     
     # Statistics
     st.subheader("📊 Statistics")
