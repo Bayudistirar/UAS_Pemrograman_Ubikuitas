@@ -210,7 +210,7 @@ if history_df is not None and len(history_df) > 0:
             mime="text/csv"
         )
 else:
-    st.info("⏳ Waiting for historical data... (Data logged every minute)")
+    st.info("⏳ Waiting for historical data... (Data logged every 10 seconds)")
 
 # Auto-refresh logic
 if auto_refresh:
